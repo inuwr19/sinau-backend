@@ -10,20 +10,16 @@ return new class extends Migration {
      */
     public function up()
     {
-        Schema::create('users', function (Blueprint $table) {
+        Schema::create('branches', function (Blueprint $table) {
             $table->id();
-            $table->foreignId('branch_id')->constrained()->cascadeOnDelete();
             $table->string('name');
-            $table->string('email')->unique();
-            $table->string('password');
-            $table->enum('role', ['admin', 'cashier', 'manager'])->default('cashier');
-            $table->rememberToken();
+            $table->string('code')->nullable()->unique();
+            $table->text('address')->nullable();
             $table->timestamps();
         });
     }
     public function down()
     {
-        Schema::dropIfExists('users');
+        Schema::dropIfExists('branches');
     }
-
 };
