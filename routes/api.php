@@ -1,5 +1,10 @@
 <?php
 
+use App\Http\Controllers\Admin\BranchController;
+use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Admin\DashboardController;
+use App\Http\Controllers\Admin\MenuItemController;
+use App\Http\Controllers\Admin\UserController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\MemberController;
 use App\Http\Controllers\MenuController;
@@ -32,4 +37,15 @@ Route::middleware('auth:sanctum')->group(function () {
     // payments admin endpoints
     Route::get('payments', [PaymentController::class, 'index']);
     Route::get('payments/{id}', [PaymentController::class, 'show']);
+
+    Route::apiResource('members', MemberController::class);
+});
+
+Route::middleware(['auth:sanctum', 'is_admin'])->prefix('admin')->group(function () {
+    Route::get('dashboard-summary', [DashboardController::class, 'summary']);
+
+    Route::apiResource('branches', BranchController::class);
+    Route::apiResource('categories', CategoryController::class);
+    Route::apiResource('menu-items', MenuItemController::class);
+    Route::apiResource('users', UserController::class);
 });
