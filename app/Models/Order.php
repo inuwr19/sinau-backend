@@ -19,6 +19,7 @@ class Order extends Model
         'tax',
         'total',
         'status',
+        'snap_token',
         'payment_method',
         'cash_received',
         'change',

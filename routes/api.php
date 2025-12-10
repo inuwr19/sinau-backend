@@ -37,6 +37,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // payments admin endpoints
     Route::get('payments', [PaymentController::class, 'index']);
     Route::get('payments/{id}', [PaymentController::class, 'show']);
+    Route::post('payments/midtrans/confirm', [PaymentController::class, 'midtransConfirm']);
 
     Route::apiResource('members', MemberController::class);
 });
@@ -48,4 +49,5 @@ Route::middleware(['auth:sanctum', 'is_admin'])->prefix('admin')->group(function
     Route::apiResource('categories', CategoryController::class);
     Route::apiResource('menu-items', MenuItemController::class);
     Route::apiResource('users', UserController::class);
+
 });

@@ -14,15 +14,18 @@ return [
     | To learn more: https://developer.mozilla.org/en-US/docs/Web/HTTP/CORS
     |
     */
+    // config/cors.php
     'paths' => ['api/*', 'sanctum/csrf-cookie'],
     'allowed_methods' => ['*'],
     'allowed_origins' => [
-        '*'
+        'http://localhost:5173',
+        'http://127.0.0.1:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
     ],
-    'allowed_origins_patterns' => [],
     'allowed_headers' => ['*'],
     'exposed_headers' => ['Authorization', 'Content-Type'],
     'max_age' => 0,
-    'supports_credentials' => false, // kita pakai token Bearer, bukan cookie
+    'supports_credentials' => false,
 
 ];
