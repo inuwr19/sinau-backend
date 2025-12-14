@@ -122,15 +122,44 @@ class PaymentController extends Controller
         if ($order->member_id && in_array($transactionStatus, ['capture', 'settlement'], true)) {
             $member = Member::find($order->member_id);
             if ($member) {
-                $pointsEarned = floor($order->total / 75000) * 10;
-                if ($pointsEarned > 0) {
-                    $member->increment('points', $pointsEarned);
-                    PointsHistory::create([
-                        'member_id' => $member->id,
-                        'order_id' => $order->id,
-                        'points_change' => $pointsEarned,
-                        'reason' => 'Earned for purchase (Midtrans local confirm)',
-                    ]);
+                // 1) redeem kalau order ini pakai poin
+                if ($order->redeemed_points > 0 && $order->redeem_discount > 0) {
+                    $alreadyRedeemed = PointsHistory::where('order_id', $order->id)
+                        ->where('points_change', '<', 0)
+                        ->exists();
+
+                    if (!$alreadyRedeemed) {
+                        $member->decrement('points', $order->redeemed_points);
+
+                        PointsHistory::create([
+                            'member_id' => $member->id,
+                            'order_id' => $order->id,
+                            'points_change' => -$order->redeemed_points,
+                            'reason' => 'Redeemed for Rp 30.000 discount (Midtrans)',
+                        ]);
+                    }
+                }
+
+                // 2) earn poin
+                $alreadyEarned = PointsHistory::where('order_id', $order->id)
+                    ->where('points_change', '>', 0)
+                    ->exists();
+
+                if (!$alreadyEarned) {
+                    $threshold = 100000;
+                    $pointsPerThreshold = 10;
+                    $pointsEarned = intdiv((int) $order->total, $threshold) * $pointsPerThreshold;
+
+                    if ($pointsEarned > 0) {
+                        $member->increment('points', $pointsEarned);
+
+                        PointsHistory::create([
+                            'member_id' => $member->id,
+                            'order_id' => $order->id,
+                            'points_change' => $pointsEarned,
+                            'reason' => 'Earned for purchase (Midtrans local confirm)',
+                        ]);
+                    }
                 }
             }
         }

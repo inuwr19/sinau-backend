@@ -23,6 +23,9 @@ class Order extends Model
         'payment_method',
         'cash_received',
         'change',
+
+        'redeemed_points',
+        'redeem_discount',
     ];
 
     protected $casts = [
@@ -32,6 +35,8 @@ class Order extends Model
         'total' => 'decimal:2',
         'cash_received' => 'decimal:2',
         'change' => 'decimal:2',
+        'redeem_discount' => 'decimal:2',
+        'redeemed_points' => 'integer',
     ];
 
     // Apply BranchScope for row-level security

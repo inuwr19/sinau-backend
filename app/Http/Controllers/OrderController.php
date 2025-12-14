@@ -69,6 +69,7 @@ class OrderController extends Controller
             'member_phone' => 'nullable|string',
             'payment_method' => 'nullable|in:cash,va,qris',
             'cash_received' => 'nullable|numeric|min:0',
+            'redeem_points' => 'nullable|boolean',
         ]);
 
         $user = $request->user();
@@ -101,12 +102,34 @@ class OrderController extends Controller
             ];
         }
 
-        $discount = 0;
+        $tax = 0;
+
+        // Diskon member 10%
+        $memberDiscount = 0;
         if ($member) {
-            $discount = round($subtotal * 0.10, 2); // 10% diskon member
+            $memberDiscount = round($subtotal * 0.10, 2);
         }
 
-        $tax = 0;
+        // Diskon tukar poin: Rp 30.000 jika:
+        // - ada member
+        // - kasir centang redeem_points
+        // - poin member >= 100
+        // - total setelah diskon member >= 30.000
+        $redeemedPoints = 0;
+        $redeemDiscount = 0;
+        $totalBeforeRedeem = $subtotal - $memberDiscount + $tax;
+
+        if (
+            $member &&
+            $request->boolean('redeem_points') &&
+            $member->points >= 100 &&
+            $totalBeforeRedeem >= 30000
+        ) {
+            $redeemedPoints = 100;
+            $redeemDiscount = 30000.00;
+        }
+
+        $discount = $memberDiscount + $redeemDiscount;
         $total = $subtotal - $discount + $tax;
 
         DB::beginTransaction();
@@ -131,6 +154,8 @@ class OrderController extends Controller
                 'payment_method' => $request->payment_method ?? null,
                 'cash_received' => $request->payment_method === 'cash' ? ($request->cash_received ?? null) : null,
                 'change' => null,
+                'redeemed_points' => $redeemedPoints,
+                'redeem_discount' => $redeemDiscount,
             ]);
 
             foreach ($itemsData as $d) {
@@ -159,9 +184,27 @@ class OrderController extends Controller
 
                 // Poin member
                 if ($member) {
-                    $pointsEarned = floor($total / 75000) * 10;
+                    // 1) redeem 100 poin -> -100 di history
+                    if ($redeemedPoints > 0 && $redeemDiscount > 0) {
+                        $member->decrement('points', $redeemedPoints);
+
+                        PointsHistory::create([
+                            'member_id' => $member->id,
+                            'order_id' => $order->id,
+                            'points_change' => -$redeemedPoints,
+                            'reason' => 'Redeemed for Rp 30.000 discount',
+                        ]);
+                    }
+
+                    // 2) earn poin baru dari total setelah semua diskon
+                    $threshold = 100000;      // Rp 100.000
+                    $pointsPerThreshold = 10; // 10 poin per 100k
+
+                    $pointsEarned = intdiv((int) $total, $threshold) * $pointsPerThreshold;
+
                     if ($pointsEarned > 0) {
                         $member->increment('points', $pointsEarned);
+
                         PointsHistory::create([
                             'member_id' => $member->id,
                             'order_id' => $order->id,
@@ -242,15 +285,46 @@ class OrderController extends Controller
             if ($order->member_id) {
                 $member = Member::find($order->member_id);
                 if ($member) {
-                    $pointsEarned = floor($order->total / 75000) * 10;
-                    if ($pointsEarned > 0) {
-                        $member->increment('points', $pointsEarned);
-                        PointsHistory::create([
-                            'member_id' => $member->id,
-                            'order_id' => $order->id,
-                            'points_change' => $pointsEarned,
-                            'reason' => 'Earned for purchase',
-                        ]);
+                    // 1) redeem, jika order ini pakai poin
+                    if ($order->redeemed_points > 0 && $order->redeem_discount > 0) {
+                        // hindari double redeem: cek apakah sudah ada history negatif
+                        $alreadyRedeemed = PointsHistory::where('order_id', $order->id)
+                            ->where('points_change', '<', 0)
+                            ->exists();
+
+                        if (!$alreadyRedeemed) {
+                            $member->decrement('points', $order->redeemed_points);
+
+                            PointsHistory::create([
+                                'member_id' => $member->id,
+                                'order_id' => $order->id,
+                                'points_change' => -$order->redeemed_points,
+                                'reason' => 'Redeemed for Rp 30.000 discount',
+                            ]);
+                        }
+                    }
+
+                    // 2) earn poin dari total
+                    $alreadyEarned = PointsHistory::where('order_id', $order->id)
+                        ->where('points_change', '>', 0)
+                        ->exists();
+
+                    if (!$alreadyEarned) {
+                        $threshold = 100000;
+                        $pointsPerThreshold = 10;
+
+                        $pointsEarned = intdiv((int) $order->total, $threshold) * $pointsPerThreshold;
+
+                        if ($pointsEarned > 0) {
+                            $member->increment('points', $pointsEarned);
+
+                            PointsHistory::create([
+                                'member_id' => $member->id,
+                                'order_id' => $order->id,
+                                'points_change' => $pointsEarned,
+                                'reason' => 'Earned for purchase',
+                            ]);
+                        }
                     }
                 }
             }
