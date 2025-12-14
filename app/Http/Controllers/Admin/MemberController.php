@@ -5,72 +5,60 @@ namespace App\Http\Controllers\Admin;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\MemberRequest;
 use App\Models\Member;
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Illuminate\Http\JsonResponse;
 
 class MemberController extends Controller
 {
-    public function index(Request $request)
+    public function index(): JsonResponse
     {
-        $q = Member::query()->orderBy('name');
+        // Kalau mau pakai pagination:
+        $members = Member::orderBy('name')->paginate(20);
+        return response()->json($members);
 
-        if ($search = $request->query('q')) {
-            $q->where('name', 'like', "%{$search}%")
-                ->orWhere('phone', 'like', "%{$search}%");
-        }
+        // $members = Member::orderBy('name')->get();
 
-        $perPage = (int) $request->query('per_page', 25);
-        return $q->paginate($perPage);
+        // return response()->json($members);
     }
 
-    public function store(MemberRequest $request)
+    public function show(Member $member): JsonResponse
     {
-        $payload = $request->validated();
-        // default points to 0 if not provided
-        $payload['points'] = $payload['points'] ?? 0;
-        $member = Member::create($payload);
+        return response()->json($member);
+    }
+
+    public function store(MemberRequest $request): JsonResponse
+    {
+        $data = $request->validated();
+
+        // Normalisasi nomor HP
+        $data['phone'] = preg_replace('/\D+/', '', $data['phone']);
+
+        // Points default 0 kalau tidak dikirim
+        if (!isset($data['points'])) {
+            $data['points'] = 0;
+        }
+
+        $member = Member::create($data);
 
         return response()->json($member, 201);
     }
 
-    public function show(Member $member)
+    public function update(MemberRequest $request, Member $member): JsonResponse
     {
-        // load relations if needed
-        $member->load('pointsHistory');
-        return $member;
-    }
+        $data = $request->validated();
 
-    public function update(MemberRequest $request, Member $member)
-    {
-        $payload = $request->validated();
-
-        // If points change here, record history (optional)
-        if (isset($payload['points']) && $payload['points'] != $member->points) {
-            $delta = (int) $payload['points'] - (int) $member->points;
-            DB::transaction(function () use ($member, $payload, $delta) {
-                $member->update($payload);
-                // create points history record
-                $member->pointsHistory()->create([
-                    'order_id' => null,
-                    'points_change' => $delta,
-                    'reason' => 'Admin adjustment',
-                ]);
-            });
-        } else {
-            $member->update($payload);
+        if (isset($data['phone'])) {
+            $data['phone'] = preg_replace('/\D+/', '', $data['phone']);
         }
 
-        return $member->fresh();
+        $member->update($data);
+
+        return response()->json($member);
     }
 
-    public function destroy(Member $member)
+    public function destroy(Member $member): JsonResponse
     {
-        // optional: prevent delete if member has orders
-        if ($member->orders()->exists()) {
-            return response()->json(['message' => 'Member has orders — cannot delete.'], 422);
-        }
-
         $member->delete();
-        return response()->json(['message' => 'Deleted']);
+
+        return response()->json(null, 204);
     }
 }
