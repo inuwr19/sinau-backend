@@ -21,19 +21,19 @@ class DashboardController extends Controller
 
         // --- Statistik order hari ini (kena BranchScope juga) ---
         $ordersTodayQuery = Order::whereDate('created_at', $today);
-        $completedTodayQuery = (clone $ordersTodayQuery)->where('status', 'completed');
+
+        // Di sistem ini status order "selesai" = 'paid'
+        $paidTodayQuery = (clone $ordersTodayQuery)->where('status', 'paid');
 
         $todayOrdersCount = $ordersTodayQuery->count();
-        $todayCompletedOrdersCount = $completedTodayQuery->count();
-        $todayRevenue = (float) $completedTodayQuery->sum('total');
+        $todayPaidOrdersCount = $paidTodayQuery->count();
+        $todayRevenue = (float) $paidTodayQuery->sum('total');
 
         // --- Item terjual hari ini ---
-        // kolom jumlah = 'qty' sesuai model OrderItem
-        // pakai join ke tabel orders agar bisa filter created_at + status
         $todayItemsSold = DB::table('order_items')
             ->join('orders', 'order_items.order_id', '=', 'orders.id')
             ->whereDate('orders.created_at', $today)
-            ->where('orders.status', 'completed')
+            ->where('orders.status', 'paid')
             ->sum('order_items.qty');
 
         // --- Statistik total ---
@@ -43,7 +43,7 @@ class DashboardController extends Controller
         $totalBranches = Branch::count();
 
         // --- Order terbaru (5 terakhir) ---
-        $recentOrders = Order::with('branch') // relasi branch() sudah ada di model Order
+        $recentOrders = Order::with('branch')
             ->orderByDesc('created_at')
             ->limit(5)
             ->get([
@@ -58,11 +58,12 @@ class DashboardController extends Controller
         return response()->json([
             'today' => [
                 'orders_count' => $todayOrdersCount,
-                'completed_orders_count' => $todayCompletedOrdersCount,
+                // tetap pakai nama completed_orders_count supaya kompatibel dengan frontend
+                'completed_orders_count' => $todayPaidOrdersCount,
                 'revenue' => $todayRevenue,
                 'items_sold' => (int) $todayItemsSold,
-                'avg_order_value' => $todayCompletedOrdersCount > 0
-                    ? $todayRevenue / $todayCompletedOrdersCount
+                'avg_order_value' => $todayPaidOrdersCount > 0
+                    ? $todayRevenue / $todayPaidOrdersCount
                     : 0,
             ],
             'totals' => [
