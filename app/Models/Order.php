@@ -11,6 +11,7 @@ class Order extends Model
 {
     protected $fillable = [
         'order_number',
+        'midtrans_order_id',
         'branch_id',
         'user_id',
         'member_id',

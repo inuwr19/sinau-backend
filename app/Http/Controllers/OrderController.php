@@ -10,6 +10,7 @@ use App\Models\PointsHistory;
 use App\Services\OrderNumberGenerator;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str; // ✅ tambah ini
 use Midtrans\Config as MidtransConfig;
 use Midtrans\Snap;
 
@@ -27,6 +28,21 @@ class OrderController extends Controller
     }
 
     /**
+     * Generate order_id yang unik untuk Midtrans (lintas device / DB)
+     * Contoh: CS-20260203-PST-006-9F3K1Z2A0B
+     */
+    private function ensureMidtransOrderId(Order $order): void
+    {
+        if (!empty($order->midtrans_order_id)) {
+            return;
+        }
+
+        $suffix = substr((string) Str::ulid(), -10); // pendek, tetap unik
+        $order->midtrans_order_id = "{$order->order_number}-{$suffix}";
+        $order->save();
+    }
+
+    /**
      * Buat Snap token Midtrans untuk order ini
      */
     private function createMidtransSnapToken(Order $order, ?Member $member, string $cashierName, string $channel): string
@@ -41,8 +57,9 @@ class OrderController extends Controller
 
         $params = [
             'transaction_details' => [
-                'order_id' => $order->order_number,
-                'gross_amount' => (int) $order->total, // rupiah tanpa desimal
+                // ✅ WAJIB unik di Midtrans (JANGAN pakai order_number langsung)
+                'order_id' => $order->midtrans_order_id,
+                'gross_amount' => (int) $order->total,
             ],
             'customer_details' => [
                 'first_name' => $member?->name ?? $cashierName,
@@ -110,11 +127,7 @@ class OrderController extends Controller
             $memberDiscount = round($subtotal * 0.10, 2);
         }
 
-        // Diskon tukar poin: Rp 30.000 jika:
-        // - ada member
-        // - kasir centang redeem_points
-        // - poin member >= 100
-        // - total setelah diskon member >= 30.000
+        // Diskon tukar poin
         $redeemedPoints = 0;
         $redeemDiscount = 0;
         $totalBeforeRedeem = $subtotal - $memberDiscount + $tax;
@@ -156,6 +169,8 @@ class OrderController extends Controller
                 'change' => null,
                 'redeemed_points' => $redeemedPoints,
                 'redeem_discount' => $redeemDiscount,
+                // ✅ midtrans_order_id diisi saat VA/QRIS
+                'midtrans_order_id' => null,
             ]);
 
             foreach ($itemsData as $d) {
@@ -182,9 +197,8 @@ class OrderController extends Controller
                     'meta' => null,
                 ]);
 
-                // Poin member
+                // Poin member (tetap seperti punyamu)
                 if ($member) {
-                    // 1) redeem 100 poin -> -100 di history
                     if ($redeemedPoints > 0 && $redeemDiscount > 0) {
                         $member->decrement('points', $redeemedPoints);
 
@@ -196,10 +210,8 @@ class OrderController extends Controller
                         ]);
                     }
 
-                    // 2) earn poin baru dari total setelah semua diskon
-                    $threshold = 100000;      // Rp 100.000
-                    $pointsPerThreshold = 10; // 10 poin per 100k
-
+                    $threshold = 100000;
+                    $pointsPerThreshold = 10;
                     $pointsEarned = intdiv((int) $total, $threshold) * $pointsPerThreshold;
 
                     if ($pointsEarned > 0) {
@@ -215,9 +227,11 @@ class OrderController extends Controller
                 }
             }
 
-            // Jika VA / QRIS: buat Snap token, simpan di order, belum ada Payment
+            // ✅ Jika VA / QRIS: buat order_id unik untuk Midtrans + Snap token
             if (in_array($request->payment_method, ['va', 'qris'], true)) {
+                $this->ensureMidtransOrderId($order);
                 $snapToken = $this->createMidtransSnapToken($order, $member, $user->name, $request->payment_method);
+
                 $order->snap_token = $snapToken;
                 $order->save();
             }
@@ -228,6 +242,7 @@ class OrderController extends Controller
                 'id' => $order->id,
                 'order_number' => $order->order_number,
                 'snap_token' => $snapToken,
+                'midtrans_order_id' => $order->midtrans_order_id,
             ], 201);
         } catch (\Throwable $e) {
             DB::rollBack();
@@ -235,18 +250,12 @@ class OrderController extends Controller
         }
     }
 
-    /**
-     * Show single order
-     */
     public function show(Request $request, $id)
     {
         $order = Order::with(['items.menuItem', 'member', 'payments', 'user'])->findOrFail($id);
         return response()->json($order);
     }
 
-    /**
-     * Pay existing order (opsional, kalau mau manual tanpa Midtrans)
-     */
     public function pay(Request $request, $id)
     {
         $request->validate([
@@ -281,13 +290,11 @@ class OrderController extends Controller
                 'meta' => null,
             ]);
 
-            // award member points jika ada
+            // points logic tetap seperti punyamu
             if ($order->member_id) {
                 $member = Member::find($order->member_id);
                 if ($member) {
-                    // 1) redeem, jika order ini pakai poin
                     if ($order->redeemed_points > 0 && $order->redeem_discount > 0) {
-                        // hindari double redeem: cek apakah sudah ada history negatif
                         $alreadyRedeemed = PointsHistory::where('order_id', $order->id)
                             ->where('points_change', '<', 0)
                             ->exists();
@@ -304,7 +311,6 @@ class OrderController extends Controller
                         }
                     }
 
-                    // 2) earn poin dari total
                     $alreadyEarned = PointsHistory::where('order_id', $order->id)
                         ->where('points_change', '>', 0)
                         ->exists();
